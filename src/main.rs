@@ -29,12 +29,15 @@ enum Commands {
         /// 输出文件夹路径
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// 覆盖已存在的输出目录
+        #[arg(long, visible_alias = "override")]
+        overwrite: bool,
         /// 禁用去噪声处理
         #[arg(long)]
         no_denoise: bool,
-        /// 启用激进去噪
+        /// 禁用激进去噪（默认启用）
         #[arg(long)]
-        aggressive: bool,
+        no_aggressive: bool,
     },
     /// 从 JSON 还原世界
     Restore {
@@ -59,9 +62,9 @@ enum Commands {
         /// 禁用去噪声处理
         #[arg(long)]
         no_denoise: bool,
-        /// 启用激进去噪
+        /// 禁用激进去噪（默认启用）
         #[arg(long)]
-        aggressive: bool,
+        no_aggressive: bool,
     },
     /// 生成默认配置文件
     Config {
@@ -97,8 +100,9 @@ fn main() -> Result<()> {
         Commands::Export {
             world,
             output,
+            overwrite,
             no_denoise,
-            aggressive,
+            no_aggressive,
         } => {
             let output_path = output.unwrap_or_else(|| {
                 let mut p = world.clone();
@@ -109,9 +113,29 @@ fn main() -> Result<()> {
                 p
             });
 
+            // 检查输出目录
+            if output_path.exists() {
+                if overwrite {
+                    // 只清理导出会生成的内容，保留 .git 等
+                    let level_json = output_path.join("level.json");
+                    if level_json.exists() {
+                        fs::remove_file(&level_json)?;
+                    }
+                    let region_dir = output_path.join("region");
+                    if region_dir.exists() {
+                        fs::remove_dir_all(&region_dir)?;
+                    }
+                } else {
+                    anyhow::bail!(
+                        "输出目录已存在: {:?}\n使用 --overwrite 覆盖",
+                        output_path
+                    );
+                }
+            }
+
             // 使用配置默认值，命令行参数优先
             let do_denoise = if no_denoise { false } else { config.export.denoise };
-            let do_aggressive = aggressive || config.export.aggressive;
+            let do_aggressive = if no_aggressive { false } else { true }; // 默认启用激进模式
 
             println!("导出世界: {:?}", world);
             println!("输出目录: {:?}", output_path);
@@ -165,7 +189,7 @@ fn main() -> Result<()> {
             dest,
             json_dir,
             no_denoise,
-            aggressive,
+            no_aggressive,
         } => {
             if dest.exists() {
                 anyhow::bail!("目标路径已存在: {:?}", dest);
@@ -173,7 +197,7 @@ fn main() -> Result<()> {
 
             // 使用配置默认值，命令行参数优先
             let do_denoise = if no_denoise { false } else { config.export.denoise };
-            let do_aggressive = aggressive || config.export.aggressive;
+            let do_aggressive = if no_aggressive { false } else { true }; // 默认启用激进模式
 
             println!("克隆世界: {:?}", source);
             println!("目标位置: {:?}", dest);

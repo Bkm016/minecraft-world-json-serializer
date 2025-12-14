@@ -13,7 +13,17 @@ pub const CHUNK_NOISE_FIELDS: &[&str] = &[
 ];
 
 /// 区块级激进去噪字段（默认值）
-pub const CHUNK_AGGRESSIVE_FIELDS: &[&str] = &["Heightmaps"];
+pub const CHUNK_AGGRESSIVE_FIELDS: &[&str] = &[
+    "Heightmaps",
+    "fluid_ticks",
+    "block_ticks",
+];
+
+/// Section 级激进去噪字段
+pub const SECTION_AGGRESSIVE_FIELDS: &[&str] = &[
+    "BlockLight",
+    "SkyLight",
+];
 
 /// 存档级噪声字段（默认值）
 pub const LEVEL_NOISE_FIELDS: &[&str] = &[
@@ -40,6 +50,16 @@ pub fn denoise_chunk(value: &mut Value, aggressive: bool) {
             for field in CHUNK_AGGRESSIVE_FIELDS {
                 map.remove(*field);
             }
+            // 处理 sections 内的字段
+            if let Some(Value::List(sections)) = map.get_mut("sections") {
+                for section in sections.iter_mut() {
+                    if let Value::Compound(sec_map) = section {
+                        for field in SECTION_AGGRESSIVE_FIELDS {
+                            sec_map.remove(*field);
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -53,6 +73,16 @@ pub fn denoise_chunk_with_config(value: &mut Value, aggressive: bool, config: &D
         if aggressive {
             for field in &config.chunk.aggressive_fields {
                 map.remove(field);
+            }
+            // 处理 sections 内的字段
+            if let Some(Value::List(sections)) = map.get_mut("sections") {
+                for section in sections.iter_mut() {
+                    if let Value::Compound(sec_map) = section {
+                        for field in SECTION_AGGRESSIVE_FIELDS {
+                            sec_map.remove(*field);
+                        }
+                    }
+                }
             }
         }
     }
@@ -95,6 +125,8 @@ pub fn restore_defaults(value: &mut Value) {
             .or_insert(Value::Long(0));
         map.entry("InhabitedTime".to_string())
             .or_insert(Value::Long(0));
-        map.entry("isLightOn".to_string()).or_insert(Value::Byte(1));
+        // isLightOn=0 让游戏重新计算光照（因为激进模式可能移除了光照数据）
+        map.entry("isLightOn".to_string())
+            .or_insert(Value::Byte(0));
     }
 }

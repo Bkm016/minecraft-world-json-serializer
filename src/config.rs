@@ -113,7 +113,11 @@ impl Default for ChunkDenoiseConfig {
                 "PostProcessing".to_string(),
                 "isLightOn".to_string(),
             ],
-            aggressive_fields: vec!["Heightmaps".to_string()],
+            aggressive_fields: vec![
+                "Heightmaps".to_string(),
+                "fluid_ticks".to_string(),
+                "block_ticks".to_string(),
+            ],
         }
     }
 }

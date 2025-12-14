@@ -232,9 +232,9 @@ fn write_chunk_file(path: &Path, chunk: &JsonValue) -> Result<()> {
                 JsonValue::Array(arr) => {
                     lines.push("\"sections\":[".to_string());
                     for (i, sec) in arr.iter().enumerate() {
-                        let compact = serde_json::to_string(sec)?;
+                        let sec_line = format_section(sec)?;
                         let comma = if i < arr.len() - 1 { "," } else { "" };
-                        lines.push(format!("{}{}", compact, comma));
+                        lines.push(format!("{}{}", sec_line, comma));
                     }
                     lines.push("]".to_string());
                 }
@@ -249,4 +249,44 @@ fn write_chunk_file(path: &Path, chunk: &JsonValue) -> Result<()> {
     lines.push("}".to_string());
     fs::write(path, lines.join("\n") + "\n")?;
     Ok(())
+}
+
+/// 格式化单个 section，关键字段分行显示
+fn format_section(sec: &JsonValue) -> Result<String> {
+    if let JsonValue::Object(obj) = sec {
+        // 定义字段顺序：Y 优先，然后按字母序
+        let priority_keys = ["Y"];
+        let mut lines = Vec::new();
+        let mut first = true;
+
+        // 先写 Y
+        for key in &priority_keys {
+            if let Some(v) = obj.get(*key) {
+                let prefix = if first { "{" } else { "" };
+                first = false;
+                lines.push(format!("{}\"{}\":{}", prefix, key, serde_json::to_string(v)?));
+            }
+        }
+
+        // 再按字母序写其他字段
+        let mut other_keys: Vec<_> = obj.keys()
+            .filter(|k| !priority_keys.contains(&k.as_str()))
+            .collect();
+        other_keys.sort();
+
+        for key in other_keys {
+            let v = &obj[key];
+            let prefix = if first { "{" } else { "" };
+            first = false;
+            lines.push(format!("{}\"{}\":{}", prefix, key, serde_json::to_string(v)?));
+        }
+
+        if lines.is_empty() {
+            Ok("{}".to_string())
+        } else {
+            Ok(lines.join(",\n") + "}")
+        }
+    } else {
+        Ok(serde_json::to_string(sec)?)
+    }
 }
