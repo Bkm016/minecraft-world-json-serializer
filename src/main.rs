@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use mcj::{export_world_with_config, restore_world, Config};
+use mcj::{export_world_with_config, restore_world_with_config, Config};
 
 /// Minecraft 世界 JSON 序列化工具 - 用于 Git 存储
 #[derive(Parser)]
@@ -180,7 +180,7 @@ fn main() -> Result<()> {
             println!();
 
             let start = Instant::now();
-            restore_world(&json_dir, &output_path, do_restore_defaults)?;
+            restore_world_with_config(&json_dir, &output_path, do_restore_defaults, &config)?;
             println!("\n耗时: {:.2}s", start.elapsed().as_secs_f64());
         }
 
@@ -223,7 +223,7 @@ fn main() -> Result<()> {
             println!("========================================");
             println!("步骤 2/2: 还原为世界");
             println!("========================================");
-            restore_world(&temp_dir, &dest, config.restore.restore_defaults)?;
+            restore_world_with_config(&temp_dir, &dest, config.restore.restore_defaults, &config)?;
 
             if use_temp {
                 let _ = fs::remove_dir_all(&temp_dir);

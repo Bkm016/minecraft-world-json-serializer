@@ -360,34 +360,28 @@ fn filter_empty_sections(chunk: &mut JsonValue) {
     }
 }
 
-/// 检查 section 是否为空（只有空气，没有其他数据）
+/// 检查 section 是否为空（只有空气，不管 biome）
 fn is_empty_section(sec: &JsonValue) -> bool {
     if let JsonValue::Object(obj) = sec {
-        // 检查 block_states
+        // 只检查 block_states 是否为空气
         if let Some(block_states) = obj.get("block_states") {
+            // 如果有 data 字段，说明不是简单的单一方块
+            if block_states.get("data").is_some() {
+                return false;
+            }
             if let Some(palette) = block_states.get("palette") {
                 if let JsonValue::Array(arr) = palette {
-                    // 如果有 data 字段，说明不是简单的单一方块
-                    if block_states.get("data").is_some() {
-                        return false;
-                    }
                     // palette 只有一个元素且是空气
                     if arr.len() == 1 {
                         if let Some(first) = arr.first() {
                             let name = first.get("Name").and_then(|n| n.as_str()).unwrap_or("");
-                            if name != "air" {
-                                return false;
-                            }
+                            return name == "air" || name == "minecraft:air";
                         }
-                    } else {
-                        return false;
                     }
                 }
             }
         }
-        // 检查 biomes - 如果 biomes 也是默认的就认为是空的
-        // 只要 block_states 是空气就认为是空 section
-        true
+        false
     } else {
         false
     }
