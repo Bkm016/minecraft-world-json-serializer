@@ -11,7 +11,10 @@ pub const CHUNK_NOISE_FIELDS: &[&str] = &[
     "PostProcessing",
     "isLightOn",
     "CarvingMasks",
+    // starlight 相关字段（状态和版本都要移除，让游戏重新计算）
     "starlight.light_version",
+    "starlight.blocklight_state",
+    "starlight.skylight_state",
 ];
 
 /// 区块级激进去噪字段（默认值）
@@ -41,6 +44,7 @@ pub const LEVEL_NOISE_FIELDS: &[&str] = &[
     "WanderingTraderId",
     "ServerBrands",
     "WasModded",
+    "Player",
 ];
 
 /// 对区块进行去噪处理（使用默认字段）

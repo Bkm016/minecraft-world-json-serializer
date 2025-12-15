@@ -386,6 +386,7 @@ dependencies = [
  "fastanvil",
  "fastnbt",
  "flate2",
+ "once_cell",
  "rayon",
  "regex",
  "serde",

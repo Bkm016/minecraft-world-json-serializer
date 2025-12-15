@@ -15,6 +15,8 @@ pub struct Config {
     pub restore: RestoreConfig,
     /// 去噪配置
     pub denoise: DenoiseConfig,
+    /// 字段名映射配置
+    pub field_mapping: FieldMappingConfig,
 }
 
 /// 导出配置
@@ -67,6 +69,16 @@ pub struct LevelDenoiseConfig {
     pub reset_weather: bool,
 }
 
+/// 字段名映射配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FieldMappingConfig {
+    /// 是否启用字段名映射
+    pub enabled: bool,
+    /// 字段名映射表：长名 -> 短名
+    pub mappings: Vec<(String, String)>,
+}
+
 // ============== 默认值 ==============
 
 impl Default for Config {
@@ -75,6 +87,7 @@ impl Default for Config {
             export: ExportConfig::default(),
             restore: RestoreConfig::default(),
             denoise: DenoiseConfig::default(),
+            field_mapping: FieldMappingConfig::default(),
         }
     }
 }
@@ -115,6 +128,10 @@ impl Default for ChunkDenoiseConfig {
                 "blending_data".to_string(),
                 "PostProcessing".to_string(),
                 "isLightOn".to_string(),
+                // starlight 相关字段
+                "starlight.light_version".to_string(),
+                "starlight.blocklight_state".to_string(),
+                "starlight.skylight_state".to_string(),
             ],
             aggressive_fields: vec![
                 "Heightmaps".to_string(),
@@ -140,8 +157,43 @@ impl Default for LevelDenoiseConfig {
                 "WanderingTraderId".to_string(),
                 "ServerBrands".to_string(),
                 "WasModded".to_string(),
+                "Player".to_string(),
             ],
             reset_weather: true,
+        }
+    }
+}
+
+impl Default for FieldMappingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mappings: vec![
+                // 版本
+                ("DataVersion".to_string(), "dv".to_string()),
+                // 区块核心字段
+                ("sections".to_string(), "sec".to_string()),
+                ("block_entities".to_string(), "be".to_string()),
+                ("block_states".to_string(), "bs".to_string()),
+                ("block_ticks".to_string(), "bt".to_string()),
+                ("fluid_ticks".to_string(), "ft".to_string()),
+                ("PostProcessing".to_string(), "pp".to_string()),
+                ("InhabitedTime".to_string(), "it".to_string()),
+                ("LastUpdate".to_string(), "lu".to_string()),
+                ("Heightmaps".to_string(), "hm".to_string()),
+                ("CarvingMasks".to_string(), "cm".to_string()),
+                ("blending_data".to_string(), "bd".to_string()),
+                ("structures".to_string(), "st".to_string()),
+                // section 字段
+                ("BlockLight".to_string(), "bl".to_string()),
+                ("SkyLight".to_string(), "skl".to_string()),
+                ("biomes".to_string(), "bio".to_string()),
+                ("palette".to_string(), "pal".to_string()),
+                // starlight mod 字段
+                ("starlight.blocklight_state".to_string(), "sl.bls".to_string()),
+                ("starlight.skylight_state".to_string(), "sl.sls".to_string()),
+                ("starlight.light_version".to_string(), "sl.lv".to_string()),
+            ],
         }
     }
 }

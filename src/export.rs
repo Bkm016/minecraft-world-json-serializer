@@ -1,9 +1,9 @@
 //! 导出世界为 JSON 格式
 
-use crate::config::{Config, DenoiseConfig, ExportConfig};
+use crate::config::{Config, DenoiseConfig, ExportConfig, FieldMappingConfig};
 use crate::denoise::{denoise_chunk, denoise_chunk_with_config, denoise_level, denoise_level_with_config};
 use crate::mca::{parse_mca_filename, read_mca};
-use crate::nbt_json::nbt_to_json;
+use crate::nbt_json::{nbt_to_json, shorten_json_keys, FieldMapper};
 use anyhow::{Context, Result};
 use fastnbt::Value;
 use rayon::prelude::*;
@@ -69,7 +69,7 @@ pub fn export_world_with_config(
     let level_dat = world_path.join("level.dat");
     if level_dat.exists() {
         println!("导出 level.dat");
-        export_level_dat_with_config(&level_dat, &output_path.join("level.json"), denoise, &config.denoise)?;
+        export_level_dat_with_config(&level_dat, &output_path.join("level.json"), denoise, &config.denoise, &config.field_mapping)?;
     }
 
     // 导出 region
@@ -86,10 +86,11 @@ pub fn export_world_with_config(
 
         let denoise_config = Arc::new(config.denoise.clone());
         let export_config = Arc::new(config.export.clone());
+        let field_mapper = Arc::new(FieldMapper::from_config(&config.field_mapping));
 
         mca_files.par_iter().for_each(|entry| {
             let mca_path = entry.path();
-            if let Err(e) = export_mca_with_config(&mca_path, &region_output, denoise, aggressive, &denoise_config, &export_config) {
+            if let Err(e) = export_mca_with_config(&mca_path, &region_output, denoise, aggressive, &denoise_config, &export_config, &field_mapper) {
                 eprintln!("  失败 {:?}: {}", mca_path.file_name().unwrap(), e);
             } else {
                 println!("  完成 {:?}", mca_path.file_name().unwrap());
@@ -129,7 +130,8 @@ pub fn export_level_dat_with_config(
     level_path: &Path,
     output_path: &Path,
     denoise: bool,
-    config: &DenoiseConfig,
+    denoise_config: &DenoiseConfig,
+    field_mapping_config: &FieldMappingConfig,
 ) -> Result<()> {
     let file = File::open(level_path)?;
     let mut decoder = flate2::read::GzDecoder::new(file);
@@ -139,12 +141,18 @@ pub fn export_level_dat_with_config(
     let mut value: Value = fastnbt::from_bytes(&data)?;
 
     if denoise {
-        denoise_level_with_config(&mut value, config);
+        denoise_level_with_config(&mut value, denoise_config);
     }
+
+    let mut json_data = nbt_to_json(&value);
+    
+    // 应用字段名映射
+    let mapper = FieldMapper::from_config(field_mapping_config);
+    mapper.shorten_json_keys(&mut json_data);
 
     let json = json!({
         "_gzip": 1,
-        "_data": nbt_to_json(&value)
+        "_data": json_data
     });
 
     let output = serde_json::to_string_pretty(&json)?;
@@ -196,6 +204,9 @@ pub fn export_mca(mca_path: &Path, output_dir: &Path, denoise: bool, aggressive:
             continue;
         }
         
+        // 缩短字段名（最后一步，在所有检查之后）
+        shorten_json_keys(&mut json);
+        
         all_chunks.push(json);
     }
 
@@ -217,6 +228,7 @@ pub fn export_mca_with_config(
     aggressive: bool,
     denoise_config: &DenoiseConfig,
     export_config: &ExportConfig,
+    field_mapper: &FieldMapper,
 ) -> Result<()> {
     let filename = mca_path.file_name().unwrap().to_str().unwrap();
     let (rx, rz) = parse_mca_filename(filename).context("无效的 MCA 文件名")?;
@@ -255,6 +267,9 @@ pub fn export_mca_with_config(
         if export_config.skip_empty_chunks && !has_chunk_data(&json) {
             continue;
         }
+        
+        // 缩短字段名（最后一步，在所有检查之后）
+        field_mapper.shorten_json_keys(&mut json);
         
         all_chunks.push(json);
     }

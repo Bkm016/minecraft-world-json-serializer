@@ -1,14 +1,207 @@
 //! NBT 与 JSON 之间的转换
 
+use crate::config::FieldMappingConfig;
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use fastnbt::{ByteArray, IntArray, LongArray, Value};
+use once_cell::sync::Lazy;
 use serde_json::{json, Map, Value as JsonValue};
 use std::collections::HashMap;
 
-/// 移除 minecraft: 前缀
-fn strip_mc_prefix(s: &str) -> String {
-    s.strip_prefix("minecraft:").unwrap_or(s).to_string()
+/// 默认字段名映射：长名 -> 短名
+static DEFAULT_SHORTEN: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+    HashMap::from([
+        // 版本
+        ("DataVersion", "dv"),
+        // 区块核心字段
+        ("sections", "sec"),
+        ("block_entities", "be"),
+        ("block_states", "bs"),
+        ("block_ticks", "bt"),
+        ("fluid_ticks", "ft"),
+        ("PostProcessing", "pp"),
+        ("InhabitedTime", "it"),
+        ("LastUpdate", "lu"),
+        ("Heightmaps", "hm"),
+        ("CarvingMasks", "cm"),
+        ("blending_data", "bd"),
+        ("structures", "st"),
+        // section 字段
+        ("BlockLight", "bl"),
+        ("SkyLight", "skl"),
+        ("biomes", "bio"),
+        ("palette", "pal"),
+        // starlight mod 字段
+        ("starlight.blocklight_state", "sl.bls"),
+        ("starlight.skylight_state", "sl.sls"),
+        ("starlight.light_version", "sl.lv"),
+    ])
+});
+
+/// 默认字段名映射：短名 -> 长名（反向查找）
+static DEFAULT_RESTORE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+    DEFAULT_SHORTEN
+        .iter()
+        .map(|(&long, &short)| (short, long))
+        .collect()
+});
+
+/// 字段名映射器
+#[derive(Debug, Clone)]
+pub struct FieldMapper {
+    enabled: bool,
+    shorten_map: HashMap<String, String>,
+    restore_map: HashMap<String, String>,
+}
+
+impl Default for FieldMapper {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            shorten_map: DEFAULT_SHORTEN
+                .iter()
+                .map(|(&k, &v)| (k.to_string(), v.to_string()))
+                .collect(),
+            restore_map: DEFAULT_RESTORE
+                .iter()
+                .map(|(&k, &v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+}
+
+impl FieldMapper {
+    /// 从配置创建映射器
+    pub fn from_config(config: &FieldMappingConfig) -> Self {
+        let shorten_map: HashMap<String, String> = config
+            .mappings
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let restore_map: HashMap<String, String> = config
+            .mappings
+            .iter()
+            .map(|(k, v)| (v.clone(), k.clone()))
+            .collect();
+        Self {
+            enabled: config.enabled,
+            shorten_map,
+            restore_map,
+        }
+    }
+
+    /// 缩短字段名
+    #[inline]
+    pub fn shorten(&self, name: &str) -> String {
+        if !self.enabled {
+            return name.to_string();
+        }
+        self.shorten_map
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
+    }
+
+    /// 还原字段名
+    #[inline]
+    pub fn restore(&self, name: &str) -> String {
+        if !self.enabled {
+            return name.to_string();
+        }
+        self.restore_map
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
+    }
+
+    /// 递归缩短 JSON 对象的字段名
+    pub fn shorten_json_keys(&self, value: &mut JsonValue) {
+        if !self.enabled {
+            return;
+        }
+        match value {
+            JsonValue::Object(obj) => {
+                let keys_to_rename: Vec<(String, String)> = obj
+                    .keys()
+                    .filter_map(|k| {
+                        let short = self.shorten(k);
+                        if short != *k {
+                            Some((k.clone(), short))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                for (old_key, new_key) in keys_to_rename {
+                    if let Some(v) = obj.remove(&old_key) {
+                        obj.insert(new_key, v);
+                    }
+                }
+
+                for v in obj.values_mut() {
+                    self.shorten_json_keys(v);
+                }
+            }
+            JsonValue::Array(arr) => {
+                for v in arr.iter_mut() {
+                    self.shorten_json_keys(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 递归还原 JSON 对象的字段名
+    pub fn restore_json_keys(&self, value: &mut JsonValue) {
+        if !self.enabled {
+            return;
+        }
+        match value {
+            JsonValue::Object(obj) => {
+                let keys_to_rename: Vec<(String, String)> = obj
+                    .keys()
+                    .filter_map(|k| {
+                        let long = self.restore(k);
+                        if long != *k {
+                            Some((k.clone(), long))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                for (old_key, new_key) in keys_to_rename {
+                    if let Some(v) = obj.remove(&old_key) {
+                        obj.insert(new_key, v);
+                    }
+                }
+
+                for v in obj.values_mut() {
+                    self.restore_json_keys(v);
+                }
+            }
+            JsonValue::Array(arr) => {
+                for v in arr.iter_mut() {
+                    self.restore_json_keys(v);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 使用默认映射缩短字段名（向后兼容）
+#[allow(dead_code)]
+#[inline]
+fn shorten_field(name: &str) -> &str {
+    DEFAULT_SHORTEN.get(name).copied().unwrap_or(name)
+}
+
+/// 使用默认映射还原字段名（向后兼容）
+#[inline]
+fn restore_field(name: &str) -> &str {
+    DEFAULT_RESTORE.get(name).copied().unwrap_or(name)
 }
 
 /// 将 fastnbt Value 转换为紧凑 JSON 格式
@@ -27,14 +220,12 @@ pub fn nbt_to_json(value: &Value) -> JsonValue {
             }
         }
         Value::String(s) => {
-            // 移除 minecraft: 前缀
-            let s = strip_mc_prefix(s);
-            // 检查是否需要转义
-            let needs_escape = is_type_like_string(&s);
+            // 检查是否需要转义（避免与类型标记冲突）
+            let needs_escape = is_type_like_string(s);
             if needs_escape {
                 JsonValue::String(format!("{}\\0", s))
             } else {
-                JsonValue::String(s)
+                JsonValue::String(s.clone())
             }
         }
         Value::ByteArray(arr) => {
@@ -107,7 +298,8 @@ pub fn json_to_nbt(json: &JsonValue) -> Result<Value> {
             }
             let mut map = HashMap::new();
             for (k, v) in obj {
-                map.insert(k.clone(), json_to_nbt(v)?);
+                let key = restore_field(k).to_string();
+                map.insert(key, json_to_nbt(v)?);
             }
             Ok(Value::Compound(map))
         }
@@ -139,7 +331,7 @@ fn parse_string_value(s: &str) -> Result<Value> {
     // 转义字符串（\0 是 2 字节 ASCII）
     if s.ends_with("\\0") {
         let unescaped = &s[..s.len() - 2];
-        return Ok(Value::String(restore_mc_prefix(unescaped)));
+        return Ok(Value::String(unescaped.to_string()));
     }
 
     // 数组类型（B;, I;, L; 都是 ASCII 前缀）
@@ -201,28 +393,18 @@ fn parse_string_value(s: &str) -> Result<Value> {
         }
     }
 
-    // 普通字符串 - 尝试还原 minecraft: 前缀
-    Ok(Value::String(restore_mc_prefix(s)))
+    // 普通字符串
+    Ok(Value::String(s.to_string()))
 }
 
-/// 还原 minecraft: 前缀
-/// 对于看起来像 Minecraft ID 的字符串（不含冒号，由小写字母/数字/下划线组成），加回前缀
-fn restore_mc_prefix(s: &str) -> String {
-    // 已经有命名空间前缀的不处理
-    if s.contains(':') {
-        return s.to_string();
-    }
-    // 空字符串不处理
-    if s.is_empty() {
-        return s.to_string();
-    }
-    // 检查是否匹配 Minecraft ID 模式：小写字母开头，只包含小写字母、数字、下划线、/、.
-    let is_mc_id = s.chars().next().map_or(false, |c| c.is_ascii_lowercase())
-        && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '/' || c == '.');
-    
-    if is_mc_id {
-        format!("minecraft:{}", s)
-    } else {
-        s.to_string()
-    }
+/// 递归缩短 JSON 对象的字段名（使用默认映射，向后兼容）
+pub fn shorten_json_keys(value: &mut JsonValue) {
+    static MAPPER: Lazy<FieldMapper> = Lazy::new(FieldMapper::default);
+    MAPPER.shorten_json_keys(value);
+}
+
+/// 递归还原 JSON 对象的字段名（使用默认映射，向后兼容）
+pub fn restore_json_keys(value: &mut JsonValue) {
+    static MAPPER: Lazy<FieldMapper> = Lazy::new(FieldMapper::default);
+    MAPPER.restore_json_keys(value);
 }
