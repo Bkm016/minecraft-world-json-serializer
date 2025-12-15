@@ -6,6 +6,11 @@ use fastnbt::{ByteArray, IntArray, LongArray, Value};
 use serde_json::{json, Map, Value as JsonValue};
 use std::collections::HashMap;
 
+/// 移除 minecraft: 前缀
+fn strip_mc_prefix(s: &str) -> String {
+    s.strip_prefix("minecraft:").unwrap_or(s).to_string()
+}
+
 /// 将 fastnbt Value 转换为紧凑 JSON 格式
 pub fn nbt_to_json(value: &Value) -> JsonValue {
     match value {
@@ -22,12 +27,14 @@ pub fn nbt_to_json(value: &Value) -> JsonValue {
             }
         }
         Value::String(s) => {
+            // 移除 minecraft: 前缀
+            let s = strip_mc_prefix(s);
             // 检查是否需要转义
-            let needs_escape = is_type_like_string(s);
+            let needs_escape = is_type_like_string(&s);
             if needs_escape {
                 JsonValue::String(format!("{}\\0", s))
             } else {
-                JsonValue::String(s.clone())
+                JsonValue::String(s)
             }
         }
         Value::ByteArray(arr) => {
@@ -131,7 +138,8 @@ pub fn json_to_nbt(json: &JsonValue) -> Result<Value> {
 fn parse_string_value(s: &str) -> Result<Value> {
     // 转义字符串（\0 是 2 字节 ASCII）
     if s.ends_with("\\0") {
-        return Ok(Value::String(s[..s.len() - 2].to_string()));
+        let unescaped = &s[..s.len() - 2];
+        return Ok(Value::String(restore_mc_prefix(unescaped)));
     }
 
     // 数组类型（B;, I;, L; 都是 ASCII 前缀）
@@ -193,6 +201,28 @@ fn parse_string_value(s: &str) -> Result<Value> {
         }
     }
 
-    // 普通字符串
-    Ok(Value::String(s.to_string()))
+    // 普通字符串 - 尝试还原 minecraft: 前缀
+    Ok(Value::String(restore_mc_prefix(s)))
+}
+
+/// 还原 minecraft: 前缀
+/// 对于看起来像 Minecraft ID 的字符串（不含冒号，由小写字母/数字/下划线组成），加回前缀
+fn restore_mc_prefix(s: &str) -> String {
+    // 已经有命名空间前缀的不处理
+    if s.contains(':') {
+        return s.to_string();
+    }
+    // 空字符串不处理
+    if s.is_empty() {
+        return s.to_string();
+    }
+    // 检查是否匹配 Minecraft ID 模式：小写字母开头，只包含小写字母、数字、下划线、/、.
+    let is_mc_id = s.chars().next().map_or(false, |c| c.is_ascii_lowercase())
+        && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '/' || c == '.');
+    
+    if is_mc_id {
+        format!("minecraft:{}", s)
+    } else {
+        s.to_string()
+    }
 }

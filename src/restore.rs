@@ -32,24 +32,34 @@ pub fn restore_world(
         let region_output = output_path.join("region");
         fs::create_dir_all(&region_output)?;
 
-        let region_dirs: Vec<_> = fs::read_dir(&region_json_path)?
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path().is_dir()
-                    && e.file_name()
-                        .to_str()
-                        .map_or(false, |n| n.starts_with("r."))
-            })
-            .collect();
+        // 收集所有 region JSON 文件，按 (rx, rz) 分组
+        // 支持切片格式: r.{rx}.{rz}.{id}.json
+        let region_re = Regex::new(r"r\.(-?\d+)\.(-?\d+)\.(\d+)\.json")?;
+        let mut region_files: std::collections::HashMap<(i32, i32), Vec<std::path::PathBuf>> =
+            std::collections::HashMap::new();
 
-        println!("还原 {} 个 region (并行处理)", region_dirs.len());
+        for entry in fs::read_dir(&region_json_path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let filename = path.file_name().unwrap().to_str().unwrap();
+            if let Some(caps) = region_re.captures(filename) {
+                let rx: i32 = caps.get(1).unwrap().as_str().parse()?;
+                let rz: i32 = caps.get(2).unwrap().as_str().parse()?;
+                region_files.entry((rx, rz)).or_default().push(path);
+            }
+        }
 
-        region_dirs.par_iter().for_each(|entry| {
-            let dir_path = entry.path();
-            if let Err(e) = restore_region_dir(&dir_path, &region_output, restore_default_values) {
-                eprintln!("  失败 {:?}: {}", dir_path.file_name().unwrap(), e);
+        println!("还原 {} 个 region (并行处理)", region_files.len());
+
+        let region_list: Vec<_> = region_files.into_iter().collect();
+        region_list.par_iter().for_each(|((rx, rz), files)| {
+            if let Err(e) = restore_region_slices(*rx, *rz, files, &region_output, restore_default_values) {
+                eprintln!("  失败 r.{}.{}: {}", rx, rz, e);
             } else {
-                println!("  完成 {:?}", dir_path.file_name().unwrap());
+                println!("  完成 r.{}.{}", rx, rz);
             }
         });
     }
@@ -80,37 +90,43 @@ pub fn restore_level_dat(json_path: &Path, output_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// 还原单个 region 目录
-pub fn restore_region_dir(
-    region_dir: &Path,
+/// 从多个切片文件还原单个 region
+pub fn restore_region_slices(
+    rx: i32,
+    rz: i32,
+    files: &[std::path::PathBuf],
     output_dir: &Path,
     restore_default_values: bool,
 ) -> Result<()> {
-    let dir_name = region_dir.file_name().unwrap().to_str().unwrap();
-    let re = Regex::new(r"r\.(-?\d+)\.(-?\d+)")?;
-    let caps = re.captures(dir_name).context("无效的 region 目录名")?;
-    let rx: i32 = caps.get(1).unwrap().as_str().parse()?;
-    let rz: i32 = caps.get(2).unwrap().as_str().parse()?;
-
     let mut chunks = Vec::new();
-    let chunk_re = Regex::new(r"c\.(-?\d+)\.(-?\d+)\.json")?;
 
-    for entry in fs::read_dir(region_dir)? {
-        let entry = entry?;
-        let path = entry.path();
+    for file_path in files {
+        let content = fs::read_to_string(file_path)?;
+        let json: JsonValue = serde_json::from_str(&content)?;
 
-        if !path.is_file() {
-            continue;
-        }
+        let chunks_array = json
+            .get("chunks")
+            .and_then(|v| v.as_array())
+            .context("缺少 chunks 数组")?;
 
-        let filename = path.file_name().unwrap().to_str().unwrap();
-        if let Some(caps) = chunk_re.captures(filename) {
-            let cx: i32 = caps.get(1).unwrap().as_str().parse()?;
-            let cz: i32 = caps.get(2).unwrap().as_str().parse()?;
+        for chunk_json in chunks_array {
+            let cx = chunk_json
+                .get("x")
+                .and_then(|v| v.as_i64())
+                .context("区块缺少 x 坐标")? as i32;
+            let cz = chunk_json
+                .get("z")
+                .and_then(|v| v.as_i64())
+                .context("区块缺少 z 坐标")? as i32;
 
-            let content = fs::read_to_string(&path)?;
-            let json: JsonValue = serde_json::from_str(&content)?;
-            let mut value = json_to_nbt(&json)?;
+            // 移除 x, z 字段后转换为 NBT
+            let mut chunk_obj = chunk_json.clone();
+            if let JsonValue::Object(ref mut obj) = chunk_obj {
+                obj.remove("x");
+                obj.remove("z");
+            }
+
+            let mut value = json_to_nbt(&chunk_obj)?;
 
             if restore_default_values {
                 restore_defaults(&mut value);

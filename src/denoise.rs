@@ -10,6 +10,8 @@ pub const CHUNK_NOISE_FIELDS: &[&str] = &[
     "blending_data",
     "PostProcessing",
     "isLightOn",
+    "CarvingMasks",
+    "starlight.light_version",
 ];
 
 /// 区块级激进去噪字段（默认值）
@@ -17,6 +19,7 @@ pub const CHUNK_AGGRESSIVE_FIELDS: &[&str] = &[
     "Heightmaps",
     "fluid_ticks",
     "block_ticks",
+    "structures",
 ];
 
 /// Section 级激进去噪字段

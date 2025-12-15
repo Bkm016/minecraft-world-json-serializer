@@ -25,6 +25,8 @@ pub struct ExportConfig {
     pub denoise: bool,
     /// 默认启用激进模式
     pub aggressive: bool,
+    /// 跳过没有实际数据的区块
+    pub skip_empty_chunks: bool,
 }
 
 /// 还原配置
@@ -82,6 +84,7 @@ impl Default for ExportConfig {
         Self {
             denoise: true,
             aggressive: false,
+            skip_empty_chunks: true,
         }
     }
 }
