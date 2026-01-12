@@ -1,6 +1,6 @@
 //! 导出世界为 JSON 格式
 
-use crate::config::{Config, DenoiseConfig, ExportConfig, FieldMappingConfig};
+use crate::config::{Area, Config, DenoiseConfig, ExportConfig, FieldMappingConfig};
 use crate::denoise::{
     denoise_chunk, denoise_chunk_with_config, denoise_level, denoise_level_with_config,
 };
@@ -123,6 +123,100 @@ pub fn export_world_with_config(
         let mca_files: Vec<_> = fs::read_dir(&region_path)?
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map_or(false, |ext| ext == "mca"))
+            .collect();
+
+        if mca_files.is_empty() {
+            continue;
+        }
+
+        println!("导出 {} ({} 个 region 文件)", dim_name, mca_files.len());
+
+        mca_files.par_iter().for_each(|entry| {
+            let mca_path = entry.path();
+            if let Err(e) = export_mca_with_config(
+                &mca_path,
+                &region_output,
+                denoise,
+                aggressive,
+                &denoise_config,
+                &export_config,
+                &field_mapper,
+            ) {
+                eprintln!("  失败 {:?}: {}", mca_path.file_name().unwrap(), e);
+            } else {
+                println!("  完成 {:?}", mca_path.file_name().unwrap());
+            }
+        });
+    }
+
+    println!("导出完成");
+    Ok(())
+}
+
+/// 导出整个世界（使用配置，支持区域过滤）
+pub fn export_world_with_area(
+    world_path: &Path,
+    output_path: &Path,
+    denoise: bool,
+    aggressive: bool,
+    config: &Config,
+    area: Option<&Area>,
+) -> Result<()> {
+    fs::create_dir_all(output_path)?;
+
+    // 导出 level.dat
+    let level_dat = world_path.join("level.dat");
+    if level_dat.exists() {
+        println!("导出 level.dat");
+        export_level_dat_with_config(
+            &level_dat,
+            &output_path.join("level.json"),
+            denoise,
+            &config.denoise,
+            &config.field_mapping,
+        )?;
+    }
+
+    if let Some(a) = area {
+        println!(
+            "工作区域: ({}, {}) ~ ({}, {})",
+            a.min.x as i32, a.min.z as i32, a.max.x as i32, a.max.z as i32
+        );
+    }
+
+    let denoise_config = Arc::new(config.denoise.clone());
+    let export_config = Arc::new(config.export.clone());
+    let field_mapper = Arc::new(FieldMapper::from_config(&config.field_mapping));
+
+    // 导出所有维度
+    for (dim_folder, dim_name) in DIMENSIONS {
+        let (region_path, region_output) = if dim_folder.is_empty() {
+            (world_path.join("region"), output_path.join("region"))
+        } else {
+            (
+                world_path.join(dim_folder).join("region"),
+                output_path.join(dim_folder).join("region"),
+            )
+        };
+
+        if !region_path.exists() {
+            continue;
+        }
+
+        let mca_files: Vec<_> = fs::read_dir(&region_path)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "mca"))
+            .filter(|e| {
+                // 如果有区域过滤，跳过不在区域内的 region
+                if let Some(area) = area {
+                    let filename = e.path();
+                    let filename = filename.file_name().unwrap().to_str().unwrap();
+                    if let Some((rx, rz)) = parse_mca_filename(filename) {
+                        return area.may_contain_region(rx, rz);
+                    }
+                }
+                true
+            })
             .collect();
 
         if mca_files.is_empty() {

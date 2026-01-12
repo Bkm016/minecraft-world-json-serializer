@@ -260,3 +260,69 @@ impl Config {
         toml::to_string_pretty(&config).unwrap_or_default()
     }
 }
+
+// ============== 工作区配置（vigrid/workspace.yml） ==============
+
+/// 坐标点
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Point3D {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+/// 工作区域
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Area {
+    pub min: Point3D,
+    pub max: Point3D,
+}
+
+impl Area {
+    /// 检查 region 是否可能包含工作区域内的区块
+    /// Region 坐标是以 32 个区块（512 个方块）为单位
+    pub fn may_contain_region(&self, region_x: i32, region_z: i32) -> bool {
+        // Region 的世界坐标范围
+        let region_min_x = region_x * 512;
+        let region_max_x = region_min_x + 511;
+        let region_min_z = region_z * 512;
+        let region_max_z = region_min_z + 511;
+
+        let area_min_x = self.min.x.floor() as i32;
+        let area_max_x = self.max.x.floor() as i32;
+        let area_min_z = self.min.z.floor() as i32;
+        let area_max_z = self.max.z.floor() as i32;
+
+        // Region 与区域有交集
+        region_max_x >= area_min_x
+            && region_min_x <= area_max_x
+            && region_max_z >= area_min_z
+            && region_min_z <= area_max_z
+    }
+}
+
+/// 工作区配置（vigrid/workspace.yml）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceConfig {
+    /// 工作区域（可选）
+    pub area: Option<Area>,
+}
+
+impl WorkspaceConfig {
+    /// 从 vigrid/workspace.yml 加载
+    pub fn load_from_world(world_path: &Path) -> Option<Self> {
+        let workspace_file = world_path.join("vigrid").join("workspace.yml");
+        if !workspace_file.exists() {
+            return None;
+        }
+
+        let content = fs::read_to_string(&workspace_file).ok()?;
+        let config: WorkspaceConfig = serde_yaml::from_str(&content).ok()?;
+
+        if config.area.is_some() {
+            eprintln!("已加载工作区配置: {}", workspace_file.display());
+        }
+
+        Some(config)
+    }
+}

@@ -6,7 +6,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use mcj::{export_world_with_config, restore_world_with_config, Config};
+use mcj::{
+    export_world_with_area, export_world_with_config, restore_world_with_config, Config,
+    WorkspaceConfig,
+};
 
 /// Minecraft 世界 JSON 序列化工具 - 用于 Git 存储
 #[derive(Parser)]
@@ -38,6 +41,9 @@ enum Commands {
         /// 禁用激进去噪（默认启用）
         #[arg(long)]
         no_aggressive: bool,
+        /// 使用 vigrid/workspace.yml 中的工作区域
+        #[arg(long)]
+        workspace: bool,
     },
     /// 从 JSON 还原世界
     Restore {
@@ -65,6 +71,9 @@ enum Commands {
         /// 禁用激进去噪（默认启用）
         #[arg(long)]
         no_aggressive: bool,
+        /// 使用 vigrid/workspace.yml 中的工作区域
+        #[arg(long)]
+        workspace: bool,
     },
     /// 生成默认配置文件
     Config {
@@ -103,6 +112,7 @@ fn main() -> Result<()> {
             overwrite,
             no_denoise,
             no_aggressive,
+            workspace,
         } => {
             let output_path = output.unwrap_or_else(|| {
                 let mut p = world.clone();
@@ -146,8 +156,26 @@ fn main() -> Result<()> {
             }
             println!();
 
+            // 加载工作区配置
+            let area = if workspace {
+                WorkspaceConfig::load_from_world(&world).and_then(|c| c.area)
+            } else {
+                None
+            };
+
             let start = Instant::now();
-            export_world_with_config(&world, &output_path, do_denoise, do_aggressive, &config)?;
+            if area.is_some() {
+                export_world_with_area(
+                    &world,
+                    &output_path,
+                    do_denoise,
+                    do_aggressive,
+                    &config,
+                    area.as_ref(),
+                )?;
+            } else {
+                export_world_with_config(&world, &output_path, do_denoise, do_aggressive, &config)?;
+            }
             println!("\n耗时: {:.2}s", start.elapsed().as_secs_f64());
         }
 
@@ -191,6 +219,7 @@ fn main() -> Result<()> {
             json_dir,
             no_denoise,
             no_aggressive,
+            workspace,
         } => {
             if dest.exists() {
                 anyhow::bail!("目标路径已存在: {:?}", dest);
@@ -214,6 +243,13 @@ fn main() -> Result<()> {
 
             let start = Instant::now();
 
+            // 加载工作区配置
+            let area = if workspace {
+                WorkspaceConfig::load_from_world(&source).and_then(|c| c.area)
+            } else {
+                None
+            };
+
             let temp_dir = json_dir.clone().unwrap_or_else(|| {
                 std::env::temp_dir().join(format!("mcj_{}", std::process::id()))
             });
@@ -222,7 +258,18 @@ fn main() -> Result<()> {
             println!("========================================");
             println!("步骤 1/2: 导出为 JSON");
             println!("========================================");
-            export_world_with_config(&source, &temp_dir, do_denoise, do_aggressive, &config)?;
+            if area.is_some() {
+                export_world_with_area(
+                    &source,
+                    &temp_dir,
+                    do_denoise,
+                    do_aggressive,
+                    &config,
+                    area.as_ref(),
+                )?;
+            } else {
+                export_world_with_config(&source, &temp_dir, do_denoise, do_aggressive, &config)?;
+            }
 
             println!();
             println!("========================================");
