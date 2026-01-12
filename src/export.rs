@@ -1,7 +1,9 @@
 //! 导出世界为 JSON 格式
 
 use crate::config::{Config, DenoiseConfig, ExportConfig, FieldMappingConfig};
-use crate::denoise::{denoise_chunk, denoise_chunk_with_config, denoise_level, denoise_level_with_config};
+use crate::denoise::{
+    denoise_chunk, denoise_chunk_with_config, denoise_level, denoise_level_with_config,
+};
 use crate::mca::{parse_mca_filename, read_mca};
 use crate::nbt_json::{nbt_to_json, shorten_json_keys, FieldMapper};
 use anyhow::{Context, Result};
@@ -12,6 +14,13 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
+
+/// 维度定义
+const DIMENSIONS: &[(&str, &str)] = &[
+    ("", "主世界"),    // 主世界 region/
+    ("DIM-1", "地狱"), // 地狱 DIM-1/region/
+    ("DIM1", "末地"),  // 末地 DIM1/region/
+];
 
 /// 导出整个世界（使用默认去噪字段）
 pub fn export_world(
@@ -29,17 +38,31 @@ pub fn export_world(
         export_level_dat(&level_dat, &output_path.join("level.json"), denoise)?;
     }
 
-    // 导出 region
-    let region_path = world_path.join("region");
-    if region_path.exists() {
-        let region_output = output_path.join("region");
+    // 导出所有维度
+    for (dim_folder, dim_name) in DIMENSIONS {
+        let (region_path, region_output) = if dim_folder.is_empty() {
+            (world_path.join("region"), output_path.join("region"))
+        } else {
+            (
+                world_path.join(dim_folder).join("region"),
+                output_path.join(dim_folder).join("region"),
+            )
+        };
+
+        if !region_path.exists() {
+            continue;
+        }
 
         let mca_files: Vec<_> = fs::read_dir(&region_path)?
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map_or(false, |ext| ext == "mca"))
             .collect();
 
-        println!("导出 {} 个 region 文件 (并行处理)", mca_files.len());
+        if mca_files.is_empty() {
+            continue;
+        }
+
+        println!("导出 {} ({} 个 region 文件)", dim_name, mca_files.len());
 
         mca_files.par_iter().for_each(|entry| {
             let mca_path = entry.path();
@@ -69,28 +92,56 @@ pub fn export_world_with_config(
     let level_dat = world_path.join("level.dat");
     if level_dat.exists() {
         println!("导出 level.dat");
-        export_level_dat_with_config(&level_dat, &output_path.join("level.json"), denoise, &config.denoise, &config.field_mapping)?;
+        export_level_dat_with_config(
+            &level_dat,
+            &output_path.join("level.json"),
+            denoise,
+            &config.denoise,
+            &config.field_mapping,
+        )?;
     }
 
-    // 导出 region
-    let region_path = world_path.join("region");
-    if region_path.exists() {
-        let region_output = output_path.join("region");
+    let denoise_config = Arc::new(config.denoise.clone());
+    let export_config = Arc::new(config.export.clone());
+    let field_mapper = Arc::new(FieldMapper::from_config(&config.field_mapping));
+
+    // 导出所有维度
+    for (dim_folder, dim_name) in DIMENSIONS {
+        let (region_path, region_output) = if dim_folder.is_empty() {
+            (world_path.join("region"), output_path.join("region"))
+        } else {
+            (
+                world_path.join(dim_folder).join("region"),
+                output_path.join(dim_folder).join("region"),
+            )
+        };
+
+        if !region_path.exists() {
+            continue;
+        }
 
         let mca_files: Vec<_> = fs::read_dir(&region_path)?
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map_or(false, |ext| ext == "mca"))
             .collect();
 
-        println!("导出 {} 个 region 文件 (并行处理)", mca_files.len());
+        if mca_files.is_empty() {
+            continue;
+        }
 
-        let denoise_config = Arc::new(config.denoise.clone());
-        let export_config = Arc::new(config.export.clone());
-        let field_mapper = Arc::new(FieldMapper::from_config(&config.field_mapping));
+        println!("导出 {} ({} 个 region 文件)", dim_name, mca_files.len());
 
         mca_files.par_iter().for_each(|entry| {
             let mca_path = entry.path();
-            if let Err(e) = export_mca_with_config(&mca_path, &region_output, denoise, aggressive, &denoise_config, &export_config, &field_mapper) {
+            if let Err(e) = export_mca_with_config(
+                &mca_path,
+                &region_output,
+                denoise,
+                aggressive,
+                &denoise_config,
+                &export_config,
+                &field_mapper,
+            ) {
                 eprintln!("  失败 {:?}: {}", mca_path.file_name().unwrap(), e);
             } else {
                 println!("  完成 {:?}", mca_path.file_name().unwrap());
@@ -145,7 +196,7 @@ pub fn export_level_dat_with_config(
     }
 
     let mut json_data = nbt_to_json(&value);
-    
+
     // 应用字段名映射
     let mapper = FieldMapper::from_config(field_mapping_config);
     mapper.shorten_json_keys(&mut json_data);
@@ -165,7 +216,12 @@ const MAX_SLICE_SIZE: usize = 8 * 1024 * 1024; // 8MB
 
 /// 导出单个 MCA 文件（使用默认去噪字段）
 /// 超过 8MB 自动切片
-pub fn export_mca(mca_path: &Path, output_dir: &Path, denoise: bool, aggressive: bool) -> Result<()> {
+pub fn export_mca(
+    mca_path: &Path,
+    output_dir: &Path,
+    denoise: bool,
+    aggressive: bool,
+) -> Result<()> {
     let filename = mca_path.file_name().unwrap().to_str().unwrap();
     let (rx, rz) = parse_mca_filename(filename).context("无效的 MCA 文件名")?;
 
@@ -183,7 +239,7 @@ pub fn export_mca(mca_path: &Path, output_dir: &Path, denoise: bool, aggressive:
         if !is_full_chunk(&chunk.data) {
             continue;
         }
-        
+
         if denoise {
             denoise_chunk(&mut chunk.data, aggressive);
         }
@@ -194,19 +250,19 @@ pub fn export_mca(mca_path: &Path, output_dir: &Path, denoise: bool, aggressive:
             obj.insert("x".to_string(), json!(chunk.x));
             obj.insert("z".to_string(), json!(chunk.z));
         }
-        
+
         // 过滤空 sections 和空值
         filter_empty_sections(&mut json);
         filter_empty_values(&mut json);
-        
+
         // 跳过没有实际数据的区块
         if !has_chunk_data(&json) {
             continue;
         }
-        
+
         // 缩短字段名（最后一步，在所有检查之后）
         shorten_json_keys(&mut json);
-        
+
         all_chunks.push(json);
     }
 
@@ -247,7 +303,7 @@ pub fn export_mca_with_config(
         if !is_full_chunk(&chunk.data) {
             continue;
         }
-        
+
         if denoise {
             denoise_chunk_with_config(&mut chunk.data, aggressive, denoise_config);
         }
@@ -258,19 +314,19 @@ pub fn export_mca_with_config(
             obj.insert("x".to_string(), json!(chunk.x));
             obj.insert("z".to_string(), json!(chunk.z));
         }
-        
+
         // 过滤空 sections 和空值
         filter_empty_sections(&mut json);
         filter_empty_values(&mut json);
-        
+
         // 跳过没有实际数据的区块（可配置）
         if export_config.skip_empty_chunks && !has_chunk_data(&json) {
             continue;
         }
-        
+
         // 缩短字段名（最后一步，在所有检查之后）
         field_mapper.shorten_json_keys(&mut json);
-        
+
         all_chunks.push(json);
     }
 
@@ -291,14 +347,14 @@ fn write_region_sliced(output_dir: &Path, rx: i32, rz: i32, chunks: &[JsonValue]
         .iter()
         .map(|c| serde_json::to_string(c).unwrap_or_default())
         .collect();
-    
+
     let mut slice_id = 0;
     let mut current_slice: Vec<&str> = Vec::new();
     let mut current_size = 0usize;
-    
+
     for chunk_str in &serialized {
         let chunk_size = chunk_str.len();
-        
+
         // 如果当前切片加上这个区块会超过限制，先写入当前切片
         if !current_slice.is_empty() && current_size + chunk_size > MAX_SLICE_SIZE {
             let file_path = output_dir.join(format!("r.{}.{}.{}.json", rx, rz, slice_id));
@@ -307,17 +363,17 @@ fn write_region_sliced(output_dir: &Path, rx: i32, rz: i32, chunks: &[JsonValue]
             current_slice.clear();
             current_size = 0;
         }
-        
+
         current_slice.push(chunk_str);
         current_size += chunk_size;
     }
-    
+
     // 写入最后一个切片
     if !current_slice.is_empty() {
         let file_path = output_dir.join(format!("r.{}.{}.{}.json", rx, rz, slice_id));
         write_chunks_direct(&file_path, &current_slice)?;
     }
-    
+
     Ok(())
 }
 
@@ -325,7 +381,7 @@ fn write_region_sliced(output_dir: &Path, rx: i32, rz: i32, chunks: &[JsonValue]
 fn write_chunks_direct(path: &Path, chunks: &[&str]) -> Result<()> {
     let total_size: usize = chunks.iter().map(|s| s.len()).sum();
     let mut output = String::with_capacity(total_size + 100);
-    
+
     output.push_str("{\"chunks\":[\n");
     for (i, chunk) in chunks.iter().enumerate() {
         output.push_str(chunk);
@@ -335,7 +391,7 @@ fn write_chunks_direct(path: &Path, chunks: &[&str]) -> Result<()> {
         output.push('\n');
     }
     output.push_str("]}\n");
-    
+
     fs::write(path, output)?;
     Ok(())
 }

@@ -13,6 +13,13 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
+/// 维度定义
+const DIMENSIONS: &[(&str, &str)] = &[
+    ("", "主世界"),    // 主世界 region/
+    ("DIM-1", "地狱"), // 地狱 DIM-1/region/
+    ("DIM1", "末地"),  // 末地 DIM1/region/
+];
+
 /// 还原整个世界
 pub fn restore_world(
     json_path: &Path,
@@ -28,11 +35,20 @@ pub fn restore_world(
         restore_level_dat(&level_json, &output_path.join("level.dat"))?;
     }
 
-    // 还原 region
-    let region_json_path = json_path.join("region");
-    if region_json_path.exists() {
-        let region_output = output_path.join("region");
-        fs::create_dir_all(&region_output)?;
+    // 还原所有维度
+    for (dim_folder, dim_name) in DIMENSIONS {
+        let (region_json_path, region_output) = if dim_folder.is_empty() {
+            (json_path.join("region"), output_path.join("region"))
+        } else {
+            (
+                json_path.join(dim_folder).join("region"),
+                output_path.join(dim_folder).join("region"),
+            )
+        };
+
+        if !region_json_path.exists() {
+            continue;
+        }
 
         // 收集所有 region JSON 文件，按 (rx, rz) 分组
         // 支持切片格式: r.{rx}.{rz}.{id}.json
@@ -54,11 +70,18 @@ pub fn restore_world(
             }
         }
 
-        println!("还原 {} 个 region (并行处理)", region_files.len());
+        if region_files.is_empty() {
+            continue;
+        }
+
+        fs::create_dir_all(&region_output)?;
+        println!("还原 {} ({} 个 region)", dim_name, region_files.len());
 
         let region_list: Vec<_> = region_files.into_iter().collect();
         region_list.par_iter().for_each(|((rx, rz), files)| {
-            if let Err(e) = restore_region_slices(*rx, *rz, files, &region_output, restore_default_values) {
+            if let Err(e) =
+                restore_region_slices(*rx, *rz, files, &region_output, restore_default_values)
+            {
                 eprintln!("  失败 r.{}.{}: {}", rx, rz, e);
             } else {
                 println!("  完成 r.{}.{}", rx, rz);
@@ -78,7 +101,7 @@ pub fn restore_world_with_config(
     config: &Config,
 ) -> Result<()> {
     fs::create_dir_all(output_path)?;
-    
+
     let field_mapper = Arc::new(FieldMapper::from_config(&config.field_mapping));
 
     // 还原 level.dat
@@ -88,11 +111,20 @@ pub fn restore_world_with_config(
         restore_level_dat_with_config(&level_json, &output_path.join("level.dat"), &field_mapper)?;
     }
 
-    // 还原 region
-    let region_json_path = json_path.join("region");
-    if region_json_path.exists() {
-        let region_output = output_path.join("region");
-        fs::create_dir_all(&region_output)?;
+    // 还原所有维度
+    for (dim_folder, dim_name) in DIMENSIONS {
+        let (region_json_path, region_output) = if dim_folder.is_empty() {
+            (json_path.join("region"), output_path.join("region"))
+        } else {
+            (
+                json_path.join(dim_folder).join("region"),
+                output_path.join(dim_folder).join("region"),
+            )
+        };
+
+        if !region_json_path.exists() {
+            continue;
+        }
 
         let region_re = Regex::new(r"r\.(-?\d+)\.(-?\d+)\.(\d+)\.json")?;
         let mut region_files: std::collections::HashMap<(i32, i32), Vec<std::path::PathBuf>> =
@@ -112,12 +144,24 @@ pub fn restore_world_with_config(
             }
         }
 
-        println!("还原 {} 个 region (并行处理)", region_files.len());
+        if region_files.is_empty() {
+            continue;
+        }
+
+        fs::create_dir_all(&region_output)?;
+        println!("还原 {} ({} 个 region)", dim_name, region_files.len());
 
         let region_list: Vec<_> = region_files.into_iter().collect();
         let mapper = field_mapper.clone();
         region_list.par_iter().for_each(|((rx, rz), files)| {
-            if let Err(e) = restore_region_slices_with_config(*rx, *rz, files, &region_output, restore_default_values, &mapper) {
+            if let Err(e) = restore_region_slices_with_config(
+                *rx,
+                *rz,
+                files,
+                &region_output,
+                restore_default_values,
+                &mapper,
+            ) {
                 eprintln!("  失败 r.{}.{}: {}", rx, rz, e);
             } else {
                 println!("  完成 r.{}.{}", rx, rz);
@@ -135,10 +179,10 @@ pub fn restore_level_dat(json_path: &Path, output_path: &Path) -> Result<()> {
     let json: JsonValue = serde_json::from_str(&content)?;
 
     let mut data = json.get("_data").context("缺少 _data 字段")?.clone();
-    
+
     // 使用默认映射器还原字段名
     restore_json_keys(&mut data);
-    
+
     let value = json_to_nbt(&data)?;
 
     let nbt_data = fastnbt::to_bytes(&value)?;
@@ -156,15 +200,19 @@ pub fn restore_level_dat(json_path: &Path, output_path: &Path) -> Result<()> {
 }
 
 /// 还原 level.dat 文件（使用配置）
-pub fn restore_level_dat_with_config(json_path: &Path, output_path: &Path, field_mapper: &FieldMapper) -> Result<()> {
+pub fn restore_level_dat_with_config(
+    json_path: &Path,
+    output_path: &Path,
+    field_mapper: &FieldMapper,
+) -> Result<()> {
     let content = fs::read_to_string(json_path)?;
     let json: JsonValue = serde_json::from_str(&content)?;
 
     let mut data = json.get("_data").context("缺少 _data 字段")?.clone();
-    
+
     // 使用配置的映射器还原字段名
     field_mapper.restore_json_keys(&mut data);
-    
+
     let value = json_to_nbt(&data)?;
 
     let nbt_data = fastnbt::to_bytes(&value)?;
@@ -204,7 +252,7 @@ pub fn restore_region_slices(
             // 还原缩短的字段名
             let mut chunk_json = chunk_json.clone();
             restore_json_keys(&mut chunk_json);
-            
+
             let cx = chunk_json
                 .get("x")
                 .and_then(|v| v.as_i64())
@@ -266,7 +314,7 @@ pub fn restore_region_slices_with_config(
             // 还原缩短的字段名
             let mut chunk_json = chunk_json.clone();
             field_mapper.restore_json_keys(&mut chunk_json);
-            
+
             let cx = chunk_json
                 .get("x")
                 .and_then(|v| v.as_i64())

@@ -126,15 +126,16 @@ fn main() -> Result<()> {
                         fs::remove_dir_all(&region_dir)?;
                     }
                 } else {
-                    anyhow::bail!(
-                        "输出目录已存在: {:?}\n使用 --overwrite 覆盖",
-                        output_path
-                    );
+                    anyhow::bail!("输出目录已存在: {:?}\n使用 --overwrite 覆盖", output_path);
                 }
             }
 
             // 使用配置默认值，命令行参数优先
-            let do_denoise = if no_denoise { false } else { config.export.denoise };
+            let do_denoise = if no_denoise {
+                false
+            } else {
+                config.export.denoise
+            };
             let do_aggressive = if no_aggressive { false } else { true }; // 默认启用激进模式
 
             println!("导出世界: {:?}", world);
@@ -196,7 +197,11 @@ fn main() -> Result<()> {
             }
 
             // 使用配置默认值，命令行参数优先
-            let do_denoise = if no_denoise { false } else { config.export.denoise };
+            let do_denoise = if no_denoise {
+                false
+            } else {
+                config.export.denoise
+            };
             let do_aggressive = if no_aggressive { false } else { true }; // 默认启用激进模式
 
             println!("克隆世界: {:?}", source);
@@ -209,9 +214,9 @@ fn main() -> Result<()> {
 
             let start = Instant::now();
 
-            let temp_dir = json_dir
-                .clone()
-                .unwrap_or_else(|| std::env::temp_dir().join(format!("mcj_{}", std::process::id())));
+            let temp_dir = json_dir.clone().unwrap_or_else(|| {
+                std::env::temp_dir().join(format!("mcj_{}", std::process::id()))
+            });
             let use_temp = json_dir.is_none();
 
             println!("========================================");
@@ -237,10 +242,7 @@ fn main() -> Result<()> {
 
         Commands::Config { output, force } => {
             if output.exists() && !force {
-                anyhow::bail!(
-                    "文件已存在: {:?}\n使用 --force 覆盖",
-                    output
-                );
+                anyhow::bail!("文件已存在: {:?}\n使用 --force 覆盖", output);
             }
 
             let default_config = Config::default();
@@ -248,16 +250,28 @@ fn main() -> Result<()> {
             println!("已生成配置文件: {:?}", output);
             println!("\n配置项说明:");
             println!("  [export]");
-            println!("    denoise = {}      # 默认启用去噪", default_config.export.denoise);
-            println!("    aggressive = {}   # 默认启用激进模式", default_config.export.aggressive);
+            println!(
+                "    denoise = {}      # 默认启用去噪",
+                default_config.export.denoise
+            );
+            println!(
+                "    aggressive = {}   # 默认启用激进模式",
+                default_config.export.aggressive
+            );
             println!("  [restore]");
-            println!("    restore_defaults = {}  # 默认恢复默认值", default_config.restore.restore_defaults);
+            println!(
+                "    restore_defaults = {}  # 默认恢复默认值",
+                default_config.restore.restore_defaults
+            );
             println!("  [denoise.chunk]");
             println!("    fields = [...]         # 区块去噪字段");
             println!("    aggressive_fields = [...]  # 激进去噪字段");
             println!("  [denoise.level]");
             println!("    fields = [...]         # 存档去噪字段");
-            println!("    reset_weather = {}     # 重置天气", default_config.denoise.level.reset_weather);
+            println!(
+                "    reset_weather = {}     # 重置天气",
+                default_config.denoise.level.reset_weather
+            );
         }
     }
 

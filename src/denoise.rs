@@ -18,18 +18,11 @@ pub const CHUNK_NOISE_FIELDS: &[&str] = &[
 ];
 
 /// 区块级激进去噪字段（默认值）
-pub const CHUNK_AGGRESSIVE_FIELDS: &[&str] = &[
-    "Heightmaps",
-    "fluid_ticks",
-    "block_ticks",
-    "structures",
-];
+pub const CHUNK_AGGRESSIVE_FIELDS: &[&str] =
+    &["Heightmaps", "fluid_ticks", "block_ticks", "structures"];
 
 /// Section 级别需要移除的光照字段（默认移除，让游戏重新计算）
-pub const SECTION_LIGHT_FIELDS: &[&str] = &[
-    "BlockLight",
-    "SkyLight",
-];
+pub const SECTION_LIGHT_FIELDS: &[&str] = &["BlockLight", "SkyLight"];
 
 /// Section 级激进去噪字段（额外的）
 pub const SECTION_AGGRESSIVE_FIELDS: &[&str] = &[];
@@ -56,7 +49,7 @@ pub fn denoise_chunk(value: &mut Value, aggressive: bool) {
         for field in CHUNK_NOISE_FIELDS {
             map.remove(*field);
         }
-        
+
         // 默认移除 section 级别的光照数据（让游戏重新计算）
         if let Some(Value::List(sections)) = map.get_mut("sections") {
             for section in sections.iter_mut() {
@@ -67,7 +60,7 @@ pub fn denoise_chunk(value: &mut Value, aggressive: bool) {
                 }
             }
         }
-        
+
         if aggressive {
             for field in CHUNK_AGGRESSIVE_FIELDS {
                 map.remove(*field);
@@ -82,7 +75,7 @@ pub fn denoise_chunk_with_config(value: &mut Value, aggressive: bool, config: &D
         for field in &config.chunk.fields {
             map.remove(field);
         }
-        
+
         // 默认移除 section 级别的光照数据
         if let Some(Value::List(sections)) = map.get_mut("sections") {
             for section in sections.iter_mut() {
@@ -93,7 +86,7 @@ pub fn denoise_chunk_with_config(value: &mut Value, aggressive: bool, config: &D
                 }
             }
         }
-        
+
         if aggressive {
             for field in &config.chunk.aggressive_fields {
                 map.remove(field);
@@ -140,7 +133,6 @@ pub fn restore_defaults(value: &mut Value) {
         map.entry("InhabitedTime".to_string())
             .or_insert(Value::Long(0));
         // isLightOn=0 让游戏重新计算光照（因为激进模式可能移除了光照数据）
-        map.entry("isLightOn".to_string())
-            .or_insert(Value::Byte(0));
+        map.entry("isLightOn".to_string()).or_insert(Value::Byte(0));
     }
 }

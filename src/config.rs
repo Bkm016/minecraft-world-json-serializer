@@ -190,7 +190,10 @@ impl Default for FieldMappingConfig {
                 ("biomes".to_string(), "bio".to_string()),
                 ("palette".to_string(), "pal".to_string()),
                 // starlight mod 字段
-                ("starlight.blocklight_state".to_string(), "sl.bls".to_string()),
+                (
+                    "starlight.blocklight_state".to_string(),
+                    "sl.bls".to_string(),
+                ),
                 ("starlight.skylight_state".to_string(), "sl.sls".to_string()),
                 ("starlight.light_version".to_string(), "sl.lv".to_string()),
             ],
